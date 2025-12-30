@@ -18,11 +18,12 @@ image_path = 'vishesh.jpg'
 b64_image = get_base64_of_bin_file(image_path)
 default_image_js = f"'{f'data:image/jpeg;base64,{b64_image}'}'" if b64_image else "null"
 
-# Custom CSS to force Fullscreen
+# Custom CSS for Background and Reset
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
 
+    /* Hide standard Streamlit UI elements */
     .stAppHeader, footer, .stToolbar {display: none !important;}
     .block-container {
         padding: 0 !important;
@@ -32,11 +33,8 @@ st.markdown("""
     
     .stApp {
         background-color: #5c94fc; 
-        overflow: hidden;
-        position: fixed;
-        width: 100%;
-        height: 100%;
-        top: 0; left: 0;
+        overflow: hidden; /* Prevent dragging */
+        /* Avoid position:fixed here to let iframe size naturally if needed */
     }
     
     .bg-layer {
@@ -49,6 +47,7 @@ st.markdown("""
         background-position: 10% 20%, 80% 10%;
         background-repeat: no-repeat;
         z-index: 0;
+        pointer-events: none;
     }
 </style>
 <div class="bg-layer"></div>
@@ -78,10 +77,7 @@ game_html = f"""
         touch-action: none;
     }}
 
-    /* 
-       LAYOUT 25 / 50 / 25 
-       Using vh units and flexbox to guarantee ratios
-    */
+    /* Layout breakdown */
     .section {{
         width: 100%;
         display: flex;
@@ -96,10 +92,12 @@ game_html = f"""
         height: 25vh;
         flex-direction: column;
         text-align: center;
+        overflow: hidden;
     }}
 
     #section-game {{
         height: 50vh;
+        background: transparent; /* Ensure visibility */
     }}
 
     #section-controls {{
@@ -107,13 +105,22 @@ game_html = f"""
         padding-bottom: 20px;
     }}
 
-    /* Typography */
+    /* Header Text */
     .hbd-text {{
         color: #FFD700;
         text-shadow: 3px 3px #000;
-        font-size: 5vw; /* Scales with screen width */
+        font-size: 5vw; 
         line-height: 1.4;
+        display: inline-block;
+        white-space: nowrap;
+        animation: floatText 10s linear infinite; 
     }}
+    
+    @keyframes floatText {{
+        0% {{ transform: translateX(100%); }}
+        100% {{ transform: translateX(-100%); }}
+    }}
+
     .level-up {{ 
         color: #ff3333; 
         font-size: 4vw; 
@@ -124,15 +131,14 @@ game_html = f"""
     /* Canvas */
     canvas {{
         border: 4px solid #fff;
-        background-color: rgba(0,0,0,0.85);
+        background-color: rgba(0,0,0,0.85); /* Dark background to ensure visibility */
         box-shadow: 0 4px 10px rgba(0,0,0,0.5);
-        /* 
-           Crucial: Fit within the 50vh container.
-           Also respect width.
-        */
+        
+        /* Size constraints */
+        width: auto;
         height: 90%; 
-        max-width: 95vw;
         aspect-ratio: 1/1;
+        
         image-rendering: pixelated;
     }}
 
@@ -157,7 +163,7 @@ game_html = f"""
         grid-template-rows: 60px 60px;
         gap: 5px;
     }}
-    /* Make buttons slightly smaller if screen is short */
+    /* Shrink controls on short screens */
     @media (max-height: 600px) {{
         #joystick-container {{ transform: scale(0.85); }}
     }}
@@ -183,43 +189,12 @@ game_html = f"""
     }}
     .spacer {{ pointer-events: none; }}
     
-    /* Overlay */
-    #start-overlay {{
-        position: fixed;
-        top: 0; left: 0; width: 100%; height: 100%;
-        background: rgba(0,0,0,0.8); /* Darker backdrop */
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 9999; /* Highest Z */
-        flex-direction: column;
-    }}
-    #start-btn {{
-        background: #00AA00;
-        color: white;
-        font-family: 'Press Start 2P';
-        padding: 20px;
-        border: 4px solid #fff;
-        font-size: 18px;
-        cursor: pointer;
-        animation: blink 1s infinite;
-        text-align: center;
-        line-height: 1.5;
-    }}
-    @keyframes blink {{ 0% {{opacity: 1;}} 50% {{opacity: 0.5;}} 100% {{opacity: 1;}} }}
-
 </style>
 </head>
 <body>
 
-<!-- OVERLAY START -->
-<div id="start-overlay" onclick="startGame()">
-    <div id="start-btn">TAP TO START<br><small style="font-size:10px">(Enable Audio)</small></div>
-</div>
-<!-- OVERLAY END -->
-
 <div id="section-header" class="section">
-    <div class="hbd-text">HAPPY BIRTHDAY<br>VISHESH!</div>
+    <div class="hbd-text">HAPPY BIRTHDAY VISHESH!</div>
     <span class="level-up">LEVEL UP! 🍄</span>
 </div>
 
@@ -240,25 +215,27 @@ game_html = f"""
 </div>
 
 <script>
+// Safe Context Retrieval
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
 let customImage = null;
 const uploadedImageSrc = {default_image_js};
 
-// Pre-load logic
+// Image Loading
 let imageLoaded = false;
 if (uploadedImageSrc) {{
     customImage = new Image();
     customImage.src = uploadedImageSrc;
-    customImage.onload = () => {{ imageLoaded = true; checkDraw(); }};
+    customImage.onload = () => {{ imageLoaded = true; }}; 
+    // We don't rely only on onload to draw, loop will handle it
 }}
 
 const ROWS = 15;
 const COLS = 15;
 const TILE_SIZE = canvas.width / COLS; 
 let totalDots = 0;
-let gameRunning = false;
+let gameRunning = true; // Always running
 
 // Map
 const map = [
@@ -283,6 +260,7 @@ let player = {{ x: 7, y: 7 }};
 let score = 0;
 const scoreEl = document.getElementById('score');
 
+// Init counts
 for(let r=0; r<ROWS; r++) {{
     for(let c=0; c<COLS; c++) {{
         if(map[r][c] === 0) totalDots++;
@@ -294,46 +272,27 @@ for(let r=0; r<ROWS; r++) {{
     }}
 }}
 
-// Audio Handling - Critical Fix
+// Audio Handling
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+let audioUnlocked = false;
 
-function unlockAudio() {{
+function tryUnlockAudio() {{
+    if (audioUnlocked) return;
     if (audioCtx.state === 'suspended') {{
-        audioCtx.resume();
+        audioCtx.resume().then(() => {{ audioUnlocked = true; }}).catch(e => console.log(e));
+    }} else {{
+        audioUnlocked = true;
     }}
-    // Play a silent buffer to verify un-mute
-    const buffer = audioCtx.createBuffer(1, 1, 22050); 
-    const source = audioCtx.createBufferSource(); 
-    source.buffer = buffer; 
-    source.connect(audioCtx.destination); 
-    source.start(0); 
-
-    // Also prime speech synthesis
-    window.speechSynthesis.cancel();
-    // Speak empty string to 'warm up'
-    // window.speechSynthesis.speak(new SpeechSynthesisUtterance(""));
 }}
 
 function speakOfCourse() {{
-    window.speechSynthesis.cancel(); // Prioritize latest
-    const u = new SpeechSynthesisUtterance("Of course");
-    u.pitch = 0.5; 
-    u.rate = 1.1;
-    u.volume = 1.0;
-    window.speechSynthesis.speak(u);
-}}
-
-function startGame() {{
-    const overlay = document.getElementById('start-overlay');
-    overlay.style.opacity = '0';
-    setTimeout(() => overlay.style.display = 'none', 500); // Fade out
-    
-    unlockAudio();
-    gameRunning = true;
-    checkDraw();
-    
-    // Play start jingle or test sound
-    speakOfCourse(); // Test verify voice immediately on start
+    tryUnlockAudio();
+    if(window.speechSynthesis) {{
+        window.speechSynthesis.cancel(); 
+        const u = new SpeechSynthesisUtterance("Of course");
+        u.pitch = 0.5; u.rate = 1.1; u.volume = 1.0;
+        window.speechSynthesis.speak(u);
+    }}
 }}
 
 function canMove(x, y) {{
@@ -342,8 +301,7 @@ function canMove(x, y) {{
 }}
 
 function moveOneStep(dx, dy) {{
-    if(!gameRunning) return;
-    
+    tryUnlockAudio();
     if (canMove(player.x + dx, player.y + dy)) {{
         player.x += dx;
         player.y += dy;
@@ -352,18 +310,16 @@ function moveOneStep(dx, dy) {{
             map[player.y][player.x] = 2; 
             score += 10;
             totalDots--;
-            scoreEl.innerText = "SCORE: " + score;
+            if(scoreEl) scoreEl.innerText = "SCORE: " + score;
             speakOfCourse();
             
             if (totalDots <= 0) {{
-                scoreEl.innerText = "YOU WON! SCORE: " + score;
+                if(scoreEl) scoreEl.innerText = "YOU WON! SCORE: " + score;
             }}
         }}
     }}
-    checkDraw();
 }}
 
-// Controls
 const up = () => moveOneStep(0, -1);
 const down = () => moveOneStep(0, 1);
 const left = () => moveOneStep(-1, 0);
@@ -374,7 +330,7 @@ const btnAdd = (id, fn) => {{
     const el = document.getElementById(id);
     if(el) {{
         el.addEventListener('touchstart', (e) => {{ e.preventDefault(); fn(); }}, opts);
-        el.addEventListener('mousedown', fn);
+        el.addEventListener('mousedown', (e) => {{ e.preventDefault(); fn(); }});
     }}
 }};
 
@@ -383,57 +339,69 @@ btnAdd('btn-down', down);
 btnAdd('btn-left', left);
 btnAdd('btn-right', right);
 
+window.addEventListener('keydown', (e) => {{
+    tryUnlockAudio();
+    if(e.key === "ArrowUp") up();
+    if(e.key === "ArrowDown") down();
+    if(e.key === "ArrowLeft") left();
+    if(e.key === "ArrowRight") right();
+}});
+
 
 function draw() {{
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    for(let r=0; r<ROWS; r++) {{
-        for(let c=0; c<COLS; c++) {{
-            let type = map[r][c];
-            let x = c * TILE_SIZE;
-            let y = r * TILE_SIZE;
-            
-            if (type === 1) {{ #0047AB
-                ctx.fillStyle = "#0047AB"; 
-                ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
-            }} else if (type === 0) {{
-                ctx.fillStyle = "#FFD700";
-                ctx.beginPath();
-                ctx.arc(x + TILE_SIZE/2, y + TILE_SIZE/2, 4, 0, Math.PI*2);
-                ctx.fill();
+    try {{
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Draw Map
+        for(let r=0; r<ROWS; r++) {{
+            for(let c=0; c<COLS; c++) {{
+                let type = map[r][c];
+                let x = c * TILE_SIZE;
+                let y = r * TILE_SIZE;
+                
+                if (type === 1) {{ 
+                    ctx.fillStyle = "#0047AB"; 
+                    ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
+                }} else if (type === 0) {{
+                    ctx.fillStyle = "#FFD700";
+                    ctx.beginPath();
+                    ctx.arc(x + TILE_SIZE/2, y + TILE_SIZE/2, 4, 0, Math.PI*2);
+                    ctx.fill();
+                }}
             }}
         }}
-    }}
 
-    let px = player.x * TILE_SIZE;
-    let py = player.y * TILE_SIZE;
+        // Draw Player
+        let px = player.x * TILE_SIZE;
+        let py = player.y * TILE_SIZE;
+        
+        if (imageLoaded && customImage) {{
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(px + TILE_SIZE/2, py + TILE_SIZE/2, TILE_SIZE/2 - 1, 0, Math.PI*2);
+            ctx.clip();
+            ctx.drawImage(customImage, px, py, TILE_SIZE, TILE_SIZE);
+            ctx.restore();
+        }} else {{
+            ctx.fillStyle = "yellow";
+            ctx.beginPath();
+            ctx.arc(px + TILE_SIZE/2, py + TILE_SIZE/2, TILE_SIZE/2 - 1, 0, Math.PI*2);
+            ctx.fill();
+        }}
+    }} catch(e) {{
+        console.error("Draw error", e);
+    }}
     
-    if (imageLoaded && customImage) {{
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(px + TILE_SIZE/2, py + TILE_SIZE/2, TILE_SIZE/2 - 1, 0, Math.PI*2);
-        ctx.clip();
-        ctx.drawImage(customImage, px, py, TILE_SIZE, TILE_SIZE);
-        ctx.restore();
-    }} else {{
-        ctx.fillStyle = "yellow";
-        ctx.beginPath();
-        ctx.arc(px + TILE_SIZE/2, py + TILE_SIZE/2, TILE_SIZE/2 - 1, 0, Math.PI*2);
-        ctx.fill();
-    }}
-}}
-
-function checkDraw() {{
     requestAnimationFrame(draw);
 }}
 
-// Initial draw, without waiting for start
-checkDraw();
+// Kickstart
+draw();
 
 </script>
 </body>
 </html>
 """
 
-# Increase iframe height significantly to ensure no scroll bars in Streamlit context
+# Increase height to 1000 to allow safe scaling on phones
 components.html(game_html, height=1000, scrolling=False)

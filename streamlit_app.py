@@ -18,12 +18,11 @@ image_path = 'vishesh.jpg'
 b64_image = get_base64_of_bin_file(image_path)
 default_image_js = f"'{f'data:image/jpeg;base64,{b64_image}'}'" if b64_image else "null"
 
-# Custom CSS for Fullscreen Mobile
+# Custom CSS to force Fullscreen
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
 
-    /* Global reset for Streamlit */
     .stAppHeader, footer, .stToolbar {display: none !important;}
     .block-container {
         padding: 0 !important;
@@ -32,14 +31,14 @@ st.markdown("""
     }
     
     .stApp {
-        background-color: #5c94fc; /* Sky Blue */
-        overflow: hidden; /* Prevent Global Scroll */
+        background-color: #5c94fc; 
+        overflow: hidden;
         position: fixed;
         width: 100%;
         height: 100%;
+        top: 0; left: 0;
     }
     
-    /* Background Elements */
     .bg-layer {
         position: fixed;
         top: 0; left: 0; width: 100%; height: 100%;
@@ -69,70 +68,100 @@ game_html = f"""
         padding: 0;
         width: 100vw;
         height: 100vh;
-        overflow: hidden; /* No scroll */
+        overflow: hidden;
         background-color: transparent;
         font-family: 'Press Start 2P', cursive;
         display: flex;
         flex-direction: column;
-        align-items: center;
-        justify-content: flex-start;
         user-select: none;
         -webkit-user-select: none;
         touch-action: none;
     }}
 
-    /* Header */
-    .header-container {{
+    /* 
+       LAYOUT 25 / 50 / 25 
+       Using vh units and flexbox to guarantee ratios
+    */
+    .section {{
         width: 100%;
-        text-align: center;
-        margin-top: 10px;
-        margin-bottom: 5px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
         z-index: 10;
-        /* No scroll animation for banner - Instant show */
+        box-sizing: border-box;
     }}
+
+    #section-header {{
+        height: 25vh;
+        flex-direction: column;
+        text-align: center;
+    }}
+
+    #section-game {{
+        height: 50vh;
+    }}
+
+    #section-controls {{
+        height: 25vh;
+        padding-bottom: 20px;
+    }}
+
+    /* Typography */
     .hbd-text {{
         color: #FFD700;
         text-shadow: 3px 3px #000;
-        font-size: 16px; /* Optimized for iPhone 12 width */
-        line-height: 1.5;
+        font-size: 5vw; /* Scales with screen width */
+        line-height: 1.4;
     }}
-    .level-up {{ color: #ff3333; font-size: 14px; display: block; margin-top: 5px; }}
+    .level-up {{ 
+        color: #ff3333; 
+        font-size: 4vw; 
+        display: block; 
+        margin-top: 5px; 
+    }}
 
     /* Canvas */
     canvas {{
         border: 4px solid #fff;
         background-color: rgba(0,0,0,0.85);
         box-shadow: 0 4px 10px rgba(0,0,0,0.5);
-        width: 90vw; /* Fit width */
-        height: 90vw; /* Square */
-        max-width: 380px; 
-        max-height: 380px;
+        /* 
+           Crucial: Fit within the 50vh container.
+           Also respect width.
+        */
+        height: 90%; 
+        max-width: 95vw;
+        aspect-ratio: 1/1;
         image-rendering: pixelated;
-        z-index: 10;
     }}
 
     #score {{
-        font-size: 14px;
-        margin: 5px 0;
+        position: absolute;
+        top: 2px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 10px;
         color: #fff;
-        text-shadow: 2px 2px #000;
-        background: #000;
-        padding: 4px 8px;
-        border: 2px solid #fff;
-        z-index: 10;
+        text-shadow: 1px 1px #000;
+        background: rgba(0,0,0,0.8);
+        padding: 4px 6px;
+        border: 1px solid #fff;
+        z-index: 20;
     }}
-    
-    /* Joystick - Pushed to bottom */
+
+    /* Joystick */
     #joystick-container {{
-        margin-top: auto; /* Push to bottom */
-        margin-bottom: 30px; /* Safe area from bottom edge */
         display: grid;
         grid-template-columns: 60px 60px 60px;
         grid-template-rows: 60px 60px;
-        gap: 8px;
-        z-index: 10;
-        touch-action: manipulation;
+        gap: 5px;
     }}
+    /* Make buttons slightly smaller if screen is short */
+    @media (max-height: 600px) {{
+        #joystick-container {{ transform: scale(0.85); }}
+    }}
+
     .d-btn {{
         width: 60px;
         height: 60px;
@@ -154,14 +183,15 @@ game_html = f"""
     }}
     .spacer {{ pointer-events: none; }}
     
+    /* Overlay */
     #start-overlay {{
-        position: absolute;
+        position: fixed;
         top: 0; left: 0; width: 100%; height: 100%;
-        background: rgba(0,0,0,0.7);
+        background: rgba(0,0,0,0.8); /* Darker backdrop */
         display: flex;
         align-items: center;
         justify-content: center;
-        z-index: 100;
+        z-index: 9999; /* Highest Z */
         flex-direction: column;
     }}
     #start-btn {{
@@ -170,8 +200,11 @@ game_html = f"""
         font-family: 'Press Start 2P';
         padding: 20px;
         border: 4px solid #fff;
-        font-size: 16px;
+        font-size: 18px;
+        cursor: pointer;
         animation: blink 1s infinite;
+        text-align: center;
+        line-height: 1.5;
     }}
     @keyframes blink {{ 0% {{opacity: 1;}} 50% {{opacity: 0.5;}} 100% {{opacity: 1;}} }}
 
@@ -179,25 +212,31 @@ game_html = f"""
 </head>
 <body>
 
+<!-- OVERLAY START -->
 <div id="start-overlay" onclick="startGame()">
-    <div id="start-btn">TAP TO START</div>
+    <div id="start-btn">TAP TO START<br><small style="font-size:10px">(Enable Audio)</small></div>
 </div>
+<!-- OVERLAY END -->
 
-<div class="header-container">
-    <div class="hbd-text">HAPPY BIRTHDAY VISHESH!</div>
+<div id="section-header" class="section">
+    <div class="hbd-text">HAPPY BIRTHDAY<br>VISHESH!</div>
     <span class="level-up">LEVEL UP! 🍄</span>
 </div>
 
-<div id="score">SCORE: 0</div>
-<canvas id="gameCanvas" width="400" height="400"></canvas>
+<div id="section-game" class="section">
+    <div id="score">SCORE: 0</div>
+    <canvas id="gameCanvas" width="400" height="400"></canvas>
+</div>
 
-<div id="joystick-container">
-    <div class="spacer"></div>
-    <div class="d-btn" id="btn-up">▲</div>
-    <div class="spacer"></div>
-    <div class="d-btn" id="btn-left">◀</div>
-    <div class="d-btn" id="btn-down">▼</div>
-    <div class="d-btn" id="btn-right">▶</div>
+<div id="section-controls" class="section">
+    <div id="joystick-container">
+        <div class="spacer"></div>
+        <div class="d-btn" id="btn-up">▲</div>
+        <div class="spacer"></div>
+        <div class="d-btn" id="btn-left">◀</div>
+        <div class="d-btn" id="btn-down">▼</div>
+        <div class="d-btn" id="btn-right">▶</div>
+    </div>
 </div>
 
 <script>
@@ -207,10 +246,12 @@ const ctx = canvas.getContext('2d');
 let customImage = null;
 const uploadedImageSrc = {default_image_js};
 
+// Pre-load logic
+let imageLoaded = false;
 if (uploadedImageSrc) {{
     customImage = new Image();
     customImage.src = uploadedImageSrc;
-    customImage.onload = () => draw(); 
+    customImage.onload = () => {{ imageLoaded = true; checkDraw(); }};
 }}
 
 const ROWS = 15;
@@ -242,7 +283,6 @@ let player = {{ x: 7, y: 7 }};
 let score = 0;
 const scoreEl = document.getElementById('score');
 
-// Init
 for(let r=0; r<ROWS; r++) {{
     for(let c=0; c<COLS; c++) {{
         if(map[r][c] === 0) totalDots++;
@@ -254,38 +294,46 @@ for(let r=0; r<ROWS; r++) {{
     }}
 }}
 
-// Audio
-const AudioContext = window.AudioContext || window.webkitAudioContext;
-const audioCtx = new AudioContext();
+// Audio Handling - Critical Fix
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
-function beep(freq, duration) {{
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = 'square';
-    osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-    osc.start();
-    osc.stop(audioCtx.currentTime + duration);
-    gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+function unlockAudio() {{
+    if (audioCtx.state === 'suspended') {{
+        audioCtx.resume();
+    }}
+    // Play a silent buffer to verify un-mute
+    const buffer = audioCtx.createBuffer(1, 1, 22050); 
+    const source = audioCtx.createBufferSource(); 
+    source.buffer = buffer; 
+    source.connect(audioCtx.destination); 
+    source.start(0); 
+
+    // Also prime speech synthesis
+    window.speechSynthesis.cancel();
+    // Speak empty string to 'warm up'
+    // window.speechSynthesis.speak(new SpeechSynthesisUtterance(""));
 }}
 
 function speakOfCourse() {{
+    window.speechSynthesis.cancel(); // Prioritize latest
     const u = new SpeechSynthesisUtterance("Of course");
-    u.pitch = 0.5; // Adjusted to be less deep, more audible on phone
+    u.pitch = 0.5; 
     u.rate = 1.1;
     u.volume = 1.0;
-    window.speechSynthesis.cancel();
     window.speechSynthesis.speak(u);
 }}
 
 function startGame() {{
-    document.getElementById('start-overlay').style.display = 'none';
-    if(audioCtx.state === 'suspended') audioCtx.resume();
-    // Warm up speech synthesis
-    window.speechSynthesis.cancel();
+    const overlay = document.getElementById('start-overlay');
+    overlay.style.opacity = '0';
+    setTimeout(() => overlay.style.display = 'none', 500); // Fade out
+    
+    unlockAudio();
     gameRunning = true;
-    draw();
+    checkDraw();
+    
+    // Play start jingle or test sound
+    speakOfCourse(); // Test verify voice immediately on start
 }}
 
 function canMove(x, y) {{
@@ -312,7 +360,7 @@ function moveOneStep(dx, dy) {{
             }}
         }}
     }}
-    draw();
+    checkDraw();
 }}
 
 // Controls
@@ -322,47 +370,45 @@ const left = () => moveOneStep(-1, 0);
 const right = () => moveOneStep(1, 0);
 
 const opts = {{passive: false}};
-document.getElementById('btn-up').addEventListener('touchstart', (e) => {{ e.preventDefault(); up(); }}, opts);
-document.getElementById('btn-down').addEventListener('touchstart', (e) => {{ e.preventDefault(); down(); }}, opts);
-document.getElementById('btn-left').addEventListener('touchstart', (e) => {{ e.preventDefault(); left(); }}, opts);
-document.getElementById('btn-right').addEventListener('touchstart', (e) => {{ e.preventDefault(); right(); }}, opts);
+const btnAdd = (id, fn) => {{
+    const el = document.getElementById(id);
+    if(el) {{
+        el.addEventListener('touchstart', (e) => {{ e.preventDefault(); fn(); }}, opts);
+        el.addEventListener('mousedown', fn);
+    }}
+}};
 
-// Prevent double firing on some devices
-document.getElementById('btn-up').addEventListener('mousedown', up);
-document.getElementById('btn-down').addEventListener('mousedown', down);
-document.getElementById('btn-left').addEventListener('mousedown', left);
-document.getElementById('btn-right').addEventListener('mousedown', right);
+btnAdd('btn-up', up);
+btnAdd('btn-down', down);
+btnAdd('btn-left', left);
+btnAdd('btn-right', right);
 
 
 function draw() {{
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
-    // Tiles
     for(let r=0; r<ROWS; r++) {{
         for(let c=0; c<COLS; c++) {{
             let type = map[r][c];
             let x = c * TILE_SIZE;
             let y = r * TILE_SIZE;
             
-            if (type === 1) {{
-                // Wall
+            if (type === 1) {{ #0047AB
                 ctx.fillStyle = "#0047AB"; 
                 ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
             }} else if (type === 0) {{
-                // Dot
                 ctx.fillStyle = "#FFD700";
                 ctx.beginPath();
-                ctx.arc(x + TILE_SIZE/2, y + TILE_SIZE/2, 4, 0, Math.PI*2); // Bigger dots
+                ctx.arc(x + TILE_SIZE/2, y + TILE_SIZE/2, 4, 0, Math.PI*2);
                 ctx.fill();
             }}
         }}
     }}
 
-    // Player
     let px = player.x * TILE_SIZE;
     let py = player.y * TILE_SIZE;
     
-    if (customImage && customImage.complete) {{
+    if (imageLoaded && customImage) {{
         ctx.save();
         ctx.beginPath();
         ctx.arc(px + TILE_SIZE/2, py + TILE_SIZE/2, TILE_SIZE/2 - 1, 0, Math.PI*2);
@@ -377,13 +423,17 @@ function draw() {{
     }}
 }}
 
-// Draw initially
-setTimeout(draw, 200);
+function checkDraw() {{
+    requestAnimationFrame(draw);
+}}
+
+// Initial draw, without waiting for start
+checkDraw();
 
 </script>
 </body>
 </html>
 """
 
-# Increase height to fill iframe but disable scrolling
-components.html(game_html, height=850, scrolling=False)
+# Increase iframe height significantly to ensure no scroll bars in Streamlit context
+components.html(game_html, height=1000, scrolling=False)

@@ -5,7 +5,7 @@ import os
 
 st.set_page_config(page_title="HBD Vishesh", layout="wide", initial_sidebar_state="collapsed")
 
-# Image Handling
+# Image & Audio Handling
 def get_base64_of_bin_file(bin_file):
     try:
         with open(bin_file, 'rb') as f:
@@ -14,13 +14,16 @@ def get_base64_of_bin_file(bin_file):
     except FileNotFoundError:
         return None
 
+# 1. VISUAL
 image_path = 'vishesh.jpg'
 b64_image = get_base64_of_bin_file(image_path)
 default_image_js = f"'{f'data:image/jpeg;base64,{b64_image}'}'" if b64_image else "null"
 
-# Short base64 sound for fallback (simple "coin" beep-like sound if speech fails)
-# This is a very short generated sound data URI to guarantee playback
-FALLBACK_SOUND = "data:audio/wav;base64,UklGRl9vT1BXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU" + "A".center(500, "A") 
+# 2. AUDIO (Balicha 5.m4a)
+audio_path = 'Balicha 5.m4a'
+b64_audio = get_base64_of_bin_file(audio_path)
+# Fallback if file missing (shouldn't happen given it's there, but good practice)
+custom_audio_js = f"'{f'data:audio/mp4;base64,{b64_audio}'}'" if b64_audio else "null"
 
 # Custom CSS
 st.markdown("""
@@ -35,7 +38,7 @@ st.markdown("""
     }
     
     .stApp {
-        background-color: #5c94fc; /* Back to Blue */
+        background-color: #5c94fc; 
         overflow: hidden; 
     }
     
@@ -138,7 +141,6 @@ game_html = f"""
         opacity: 0.9;
     }}
 
-    /* Canvas */
     canvas {{
         border: 4px solid #fff;
         background-color: rgba(0,0,0,0.85); 
@@ -162,16 +164,9 @@ game_html = f"""
         border: 1px solid #fff;
         z-index: 20;
     }}
-    
-    #audio-status {{
-        position: absolute;
-        bottom: 2px;
-        right: 2px;
-        font-size: 10px;
-        color: rgba(255,255,255,0.5);
-        pointer-events: none;
-        z-index: 30;
-    }}
+
+    /* Hidden Audio Status */
+    #audio-status {{ display: none; }}
 
     #joystick-container {{
         display: grid;
@@ -236,84 +231,63 @@ game_html = f"""
 // Contexts
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
-const audioStatus = document.getElementById('audio-status');
 
-// Helper to beep using Oscillator (Lowest level fallback)
-const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-function playBeep(freq=440, type='square') {{
-    try {{
-        if(audioCtx.state === 'suspended') audioCtx.resume();
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.frequency.value = freq;
-        osc.type = type;
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.start();
-        gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.15);
-        osc.stop(audioCtx.currentTime + 0.15);
-    }} catch(e) {{ console.error(e); }}
+// --- AUDIO SYSTEM (Custom File) ---
+const customAudioSrc = {custom_audio_js};
+// Preload 2 copies to allow overlapping overlapping sounds if user is fast
+const soundPool = [];
+const POOL_SIZE = 3;
+
+if(customAudioSrc) {{
+    for(let i=0; i<POOL_SIZE; i++) {{
+        let a = new Audio(customAudioSrc);
+        a.load(); 
+        soundPool.push(a);
+    }}
 }}
 
-// Unlocker
+// Helper to get next available sound
+let poolIdx = 0;
+function playCustomSound() {{
+    if(soundPool.length > 0) {{
+        let s = soundPool[poolIdx];
+        s.currentTime = 0;
+        // Important: .play() returns a promise.
+        // We catch errors to avoid unhandled promise rejections if locked.
+        s.play().catch(e => console.log("Audio locked or error", e));
+        
+        poolIdx = (poolIdx + 1) % POOL_SIZE;
+    }}
+}}
+
+// Unlocker Logic (Still needed even for 'new Audio()')
+// Mobile Safari/Chrome suspends Audio elements until first interaction.
 let unlocked = false;
 function globalUnlock() {{
     if(!unlocked) {{
-        // 1. Resume Context
-        if(audioCtx.state === 'suspended') audioCtx.resume();
-        
-        // 2. Play silent 0-sec beep
-        const osc = audioCtx.createOscillator();
-        osc.connect(audioCtx.destination);
-        osc.start();
-        osc.stop(audioCtx.currentTime + 0.001);
-        
-        // 3. Prime Speech
-        if(window.speechSynthesis) {{
-            window.speechSynthesis.speak(new SpeechSynthesisUtterance(""));
+        // Play one silent sound from pool to unlock them?
+        // Or just resume AudioContext (good practice for general audio)
+        // Actually for HTML5 Audio, usually one interaction is enough if we play() inside it.
+        // But let's try to 'warm up' the pool 
+        if(soundPool.length > 0) {{
+            // We just need to trigger this logic once inside a user event
+            soundPool.forEach(s => {{
+                // Trick to unlock: play and pause immediately?
+                // Or just trust that subsequent calls will work.
+                // Best trick: play muted, then unmute?
+                // Let's rely on the direct call in 'moveOneStep' which IS a user event (touchstart/click)
+                // BUT 'swipe' logic is async (touchend), so we might lose the "user gesture" token.
+                // So we MUST unlock here.
+                s.muted = true;
+                s.play().then(() => {{ s.pause(); s.currentTime=0; s.muted=false; }}).catch(e=>{{}});
+            }});
         }}
-        
         unlocked = true;
-        audioStatus.innerText = "Audio: ON";
-        audioStatus.style.color = "#00FF00";
     }}
 }}
 document.body.addEventListener('touchstart', globalUnlock, {{passive: false}});
 document.body.addEventListener('click', globalUnlock);
 document.body.addEventListener('keydown', globalUnlock);
-
-// Main Sound Function
-function playWinSound() {{
-    // Strategy 1: Speech
-    let speechSuccess = false;
-    if(window.speechSynthesis) {{
-        window.speechSynthesis.cancel();
-        const u = new SpeechSynthesisUtterance("Of course");
-        u.pitch = 0.5; u.rate = 1.2; u.volume = 1;
-        // Try english
-        const voices = window.speechSynthesis.getVoices();
-        const eng = voices.find(v => v.lang.includes('en'));
-        if(eng) u.voice = eng;
-        
-        // If it throws or is muted, we can't easily detect.
-        // We assume it works, but schedule a backup beep just in case?
-        // No, that creates double noise. We'll stick to 'Try Speech'.
-        // If speech fails silently, user gets nothing unless we do beep.
-        
-        window.speechSynthesis.speak(u);
-        speechSuccess = true;
-    }}
-    
-    // Strategy 2: Always play a tiny satisfying 'blip' effectively effectively mixing them
-    playBeep(600, 'square');
-    
-    // If speech API missing entirely
-    if(!speechSuccess) {{
-        // Play a second beep to be distinct
-         setTimeout(() => playBeep(800, 'square'), 100);
-    }}
-}}
-
 
 // Init Image
 let customImage = null;
@@ -365,8 +339,6 @@ function canMove(x, y) {{
 }}
 
 function moveOneStep(dx, dy) {{
-    globalUnlock(); 
-
     if (canMove(player.x + dx, player.y + dy)) {{
         player.x += dx;
         player.y += dy;
@@ -377,7 +349,7 @@ function moveOneStep(dx, dy) {{
             totalDots--;
             if(scoreEl) scoreEl.innerText = "SCORE: " + score;
             
-            playWinSound(); // Trigger universal sound
+            playCustomSound(); 
             
             if (totalDots <= 0) {{
                 if(scoreEl) scoreEl.innerText = "YOU WON! SCORE: " + score;
@@ -417,7 +389,7 @@ let touchStartX = 0;
 let touchStartY = 0;
 const SWIPE_THRESHOLD = 30; 
 document.addEventListener('touchstart', function(e) {{
-    globalUnlock();
+    globalUnlock(); 
     if(e.target.closest('.d-btn')) return;
     touchStartX = e.changedTouches[0].screenX;
     touchStartY = e.changedTouches[0].screenY;

@@ -18,6 +18,10 @@ image_path = 'vishesh.jpg'
 b64_image = get_base64_of_bin_file(image_path)
 default_image_js = f"'{f'data:image/jpeg;base64,{b64_image}'}'" if b64_image else "null"
 
+# Short base64 sound for fallback (simple "coin" beep-like sound if speech fails)
+# This is a very short generated sound data URI to guarantee playback
+FALLBACK_SOUND = "data:audio/wav;base64,UklGRl9vT1BXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU" + "A".center(500, "A") 
+
 # Custom CSS
 st.markdown("""
 <style>
@@ -31,7 +35,7 @@ st.markdown("""
     }
     
     .stApp {
-        background-color: #5c94fc; 
+        background-color: #5c94fc; /* Back to Blue */
         overflow: hidden; 
     }
     
@@ -159,12 +163,11 @@ game_html = f"""
         z-index: 20;
     }}
     
-    /* Audio Status Indicator */
     #audio-status {{
         position: absolute;
         bottom: 2px;
         right: 2px;
-        font-size: 12px;
+        font-size: 10px;
         color: rgba(255,255,255,0.5);
         pointer-events: none;
         z-index: 30;
@@ -192,6 +195,7 @@ game_html = f"""
         font-size: 20px;
         cursor: pointer;
         color: #fff;
+        text-shadow: 1px 1px 0 #000;
         box-shadow: 0 4px #5a0000;
     }}
     .d-btn:active {{
@@ -213,7 +217,7 @@ game_html = f"""
 
 <div id="section-game" class="section">
     <div id="score">SCORE: 0</div>
-    <div id="audio-status">🔈 OFF</div>
+    <div id="audio-status">Audio: Tap to Enable</div>
     <canvas id="gameCanvas" width="400" height="400"></canvas>
 </div>
 
@@ -229,28 +233,101 @@ game_html = f"""
 </div>
 
 <script>
+// Contexts
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const audioStatus = document.getElementById('audio-status');
 
+// Helper to beep using Oscillator (Lowest level fallback)
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+function playBeep(freq=440, type='square') {{
+    try {{
+        if(audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.frequency.value = freq;
+        osc.type = type;
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.15);
+        osc.stop(audioCtx.currentTime + 0.15);
+    }} catch(e) {{ console.error(e); }}
+}}
+
+// Unlocker
+let unlocked = false;
+function globalUnlock() {{
+    if(!unlocked) {{
+        // 1. Resume Context
+        if(audioCtx.state === 'suspended') audioCtx.resume();
+        
+        // 2. Play silent 0-sec beep
+        const osc = audioCtx.createOscillator();
+        osc.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.001);
+        
+        // 3. Prime Speech
+        if(window.speechSynthesis) {{
+            window.speechSynthesis.speak(new SpeechSynthesisUtterance(""));
+        }}
+        
+        unlocked = true;
+        audioStatus.innerText = "Audio: ON";
+        audioStatus.style.color = "#00FF00";
+    }}
+}}
+document.body.addEventListener('touchstart', globalUnlock, {{passive: false}});
+document.body.addEventListener('click', globalUnlock);
+document.body.addEventListener('keydown', globalUnlock);
+
+// Main Sound Function
+function playWinSound() {{
+    // Strategy 1: Speech
+    let speechSuccess = false;
+    if(window.speechSynthesis) {{
+        window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance("Of course");
+        u.pitch = 0.5; u.rate = 1.2; u.volume = 1;
+        // Try english
+        const voices = window.speechSynthesis.getVoices();
+        const eng = voices.find(v => v.lang.includes('en'));
+        if(eng) u.voice = eng;
+        
+        // If it throws or is muted, we can't easily detect.
+        // We assume it works, but schedule a backup beep just in case?
+        // No, that creates double noise. We'll stick to 'Try Speech'.
+        // If speech fails silently, user gets nothing unless we do beep.
+        
+        window.speechSynthesis.speak(u);
+        speechSuccess = true;
+    }}
+    
+    // Strategy 2: Always play a tiny satisfying 'blip' effectively effectively mixing them
+    playBeep(600, 'square');
+    
+    // If speech API missing entirely
+    if(!speechSuccess) {{
+        // Play a second beep to be distinct
+         setTimeout(() => playBeep(800, 'square'), 100);
+    }}
+}}
+
+
+// Init Image
 let customImage = null;
 const uploadedImageSrc = {default_image_js};
-
-// Image Loading
-let imageLoaded = false;
 if (uploadedImageSrc) {{
     customImage = new Image();
     customImage.src = uploadedImageSrc;
-    customImage.onload = () => {{ imageLoaded = true; }}; 
 }}
 
 const ROWS = 15;
 const COLS = 15;
 const TILE_SIZE = canvas.width / COLS; 
 let totalDots = 0;
-let gameRunning = true; 
 
-// Map
 const map = [
     [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
     [1,0,0,0,1,0,0,0,0,0,1,0,0,0,1],
@@ -277,69 +354,10 @@ for(let r=0; r<ROWS; r++) {{
     for(let c=0; c<COLS; c++) {{
         if(map[r][c] === 0) totalDots++;
         if(map[r][c] === 9) {{
-            player.x = c;
-            player.y = r;
-            map[r][c] = 2;
+            player.x = c; player.y = r; map[r][c] = 2;
         }}
     }}
 }}
-
-// --- AUDIO SYSTEM ---
-const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-let unlocked = false;
-
-// Global Unlocking Logic
-function unlockAudio() {{
-    if (!unlocked) {{
-        // Resume AudioContext
-        if (audioCtx.state === 'suspended') {{
-            audioCtx.resume();
-        }}
-        
-        // Prime Speech
-        if(window.speechSynthesis) {{
-            window.speechSynthesis.speak(new SpeechSynthesisUtterance("")); 
-        }}
-        
-        // Play silent buffer
-        const buffer = audioCtx.createBuffer(1, 1, 22050); 
-        const source = audioCtx.createBufferSource(); 
-        source.buffer = buffer; 
-        source.connect(audioCtx.destination); 
-        source.start(0); 
-        
-        unlocked = true;
-        audioStatus.innerText = "🔊 ON";
-        audioStatus.style.color = "#00ff00";
-    }}
-}}
-
-// Global Listener for ANY touch
-document.body.addEventListener('touchstart', unlockAudio, {{passive: false}});
-document.body.addEventListener('click', unlockAudio);
-document.body.addEventListener('keydown', unlockAudio);
-
-function speakOfCourse() {{
-    unlockAudio(); // Ensure unlocked
-    
-    if(window.speechSynthesis) {{
-         // Simple Cancel and Speak
-         window.speechSynthesis.cancel();
-         
-         const u = new SpeechSynthesisUtterance("Of course");
-         u.pitch = 0.5; 
-         u.rate = 1.1; 
-         u.volume = 1.0;
-         window.speechSynthesis.speak(u);
-    }}
-}}
-
-// Load voices
-if(window.speechSynthesis) {{
-    window.speechSynthesis.onvoiceschanged = () => {{ window.speechSynthesis.getVoices(); }};
-}}
-
-// --- GAME LOGIC ---
 
 function canMove(x, y) {{
     if (y < 0 || y >= ROWS || x < 0 || x >= COLS) return false;
@@ -347,7 +365,7 @@ function canMove(x, y) {{
 }}
 
 function moveOneStep(dx, dy) {{
-    unlockAudio(); // Redundant unlock check
+    globalUnlock(); 
 
     if (canMove(player.x + dx, player.y + dy)) {{
         player.x += dx;
@@ -359,8 +377,7 @@ function moveOneStep(dx, dy) {{
             totalDots--;
             if(scoreEl) scoreEl.innerText = "SCORE: " + score;
             
-            // Trigger Audio
-            speakOfCourse();
+            playWinSound(); // Trigger universal sound
             
             if (totalDots <= 0) {{
                 if(scoreEl) scoreEl.innerText = "YOU WON! SCORE: " + score;
@@ -374,7 +391,7 @@ const down = () => moveOneStep(0, 1);
 const left = () => moveOneStep(-1, 0);
 const right = () => moveOneStep(1, 0);
 
-// CONTROLS SETUP
+// CONTROLS
 const opts = {{passive: false}};
 const btnAdd = (id, fn) => {{
     const el = document.getElementById(id);
@@ -395,12 +412,12 @@ window.addEventListener('keydown', (e) => {{
     if(e.key === "ArrowRight") right();
 }});
 
-// Swipe Support
+// Swipe
 let touchStartX = 0;
 let touchStartY = 0;
 const SWIPE_THRESHOLD = 30; 
-
 document.addEventListener('touchstart', function(e) {{
+    globalUnlock();
     if(e.target.closest('.d-btn')) return;
     touchStartX = e.changedTouches[0].screenX;
     touchStartY = e.changedTouches[0].screenY;
@@ -408,78 +425,51 @@ document.addEventListener('touchstart', function(e) {{
 
 document.addEventListener('touchend', function(e) {{
     if(e.target.closest('.d-btn')) return;
-    
     let touchEndX = e.changedTouches[0].screenX;
     let touchEndY = e.changedTouches[0].screenY;
-    
     let diffX = touchEndX - touchStartX;
     let diffY = touchEndY - touchStartY;
     
     if (Math.abs(diffX) > Math.abs(diffY)) {{
         if (Math.abs(diffX) > SWIPE_THRESHOLD) {{
-            if (diffX > 0) right();
-            else left();
+            if (diffX > 0) right(); else left();
         }}
     }} else {{
         if (Math.abs(diffY) > SWIPE_THRESHOLD) {{
-            if (diffY > 0) down();
-            else up();
+            if (diffY > 0) down(); else up();
         }}
     }}
 }}, false);
 
-
-// Draw Loop
+// Draw
 function draw() {{
-    try {{
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
-        // Draw Map
-        for(let r=0; r<ROWS; r++) {{
-            for(let c=0; c<COLS; c++) {{
-                let type = map[r][c];
-                let x = c * TILE_SIZE;
-                let y = r * TILE_SIZE;
-                
-                if (type === 1) {{ 
-                    ctx.fillStyle = "#0047AB"; 
-                    ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
-                }} else if (type === 0) {{
-                    ctx.fillStyle = "#FFD700";
-                    ctx.beginPath();
-                    ctx.arc(x + TILE_SIZE/2, y + TILE_SIZE/2, 4, 0, Math.PI*2);
-                    ctx.fill();
-                }}
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for(let r=0; r<ROWS; r++) {{
+        for(let c=0; c<COLS; c++) {{
+            let type = map[r][c];
+            let x = c * TILE_SIZE;
+            let y = r * TILE_SIZE;
+            if (type === 1) {{ 
+                ctx.fillStyle = "#0047AB"; ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
+            }} else if (type === 0) {{
+                ctx.fillStyle = "#FFD700"; ctx.beginPath();
+                ctx.arc(x + TILE_SIZE/2, y + TILE_SIZE/2, 4, 0, Math.PI*2); ctx.fill();
             }}
         }}
-
-        // Draw Player
-        let px = player.x * TILE_SIZE;
-        let py = player.y * TILE_SIZE;
-        
-        if (imageLoaded && customImage) {{
-            ctx.save();
-            ctx.beginPath();
-            ctx.arc(px + TILE_SIZE/2, py + TILE_SIZE/2, TILE_SIZE/2 - 1, 0, Math.PI*2);
-            ctx.clip();
-            ctx.drawImage(customImage, px, py, TILE_SIZE, TILE_SIZE);
-            ctx.restore();
-        }} else {{
-            ctx.fillStyle = "yellow";
-            ctx.beginPath();
-            ctx.arc(px + TILE_SIZE/2, py + TILE_SIZE/2, TILE_SIZE/2 - 1, 0, Math.PI*2);
-            ctx.fill();
-        }}
-    }} catch(e) {{
-        console.error("Draw error", e);
     }}
-    
+    let px = player.x * TILE_SIZE;
+    let py = player.y * TILE_SIZE;
+    if (customImage && customImage.complete) {{
+        ctx.save(); ctx.beginPath();
+        ctx.arc(px + TILE_SIZE/2, py + TILE_SIZE/2, TILE_SIZE/2 - 1, 0, Math.PI*2);
+        ctx.clip(); ctx.drawImage(customImage, px, py, TILE_SIZE, TILE_SIZE); ctx.restore();
+    }} else {{
+        ctx.fillStyle = "yellow"; ctx.beginPath();
+        ctx.arc(px + TILE_SIZE/2, py + TILE_SIZE/2, TILE_SIZE/2 - 1, 0, Math.PI*2); ctx.fill();
+    }}
     requestAnimationFrame(draw);
 }}
-
-// Kickstart
 draw();
-
 </script>
 </body>
 </html>

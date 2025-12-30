@@ -126,6 +126,16 @@ game_html = f"""
         display: block; 
         margin-top: 5px; 
     }}
+    
+    .instruction-text {{
+        color: #fff;
+        font-size: 2.5vw; /* Smaller text */
+        display: block;
+        margin-top: 5px;
+        text-shadow: 1px 1px #000;
+        font-family: monospace; /* Easier to read for instructions */
+        opacity: 0.9;
+    }}
 
     /* Canvas */
     canvas {{
@@ -192,6 +202,7 @@ game_html = f"""
 <div id="section-header" class="section">
     <div class="hbd-text">HAPPY BIRTHDAY VISHESH!</div>
     <span class="level-up">LEVEL UP! 🍄</span>
+    <span class="instruction-text">Swipe / Use Joystick to move Vishesh</span>
 </div>
 
 <div id="section-game" class="section">
@@ -272,9 +283,11 @@ const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 let audioUnlocked = false;
 
 function tryUnlockAudio() {{
-    if (audioUnlocked) return;
+    // Only attempt unlock if suspended
     if (audioCtx.state === 'suspended') {{
-        audioCtx.resume().then(() => {{ audioUnlocked = true; }}).catch(e => console.log(e));
+        audioCtx.resume().then(() => {{ 
+            audioUnlocked = true; 
+        }}).catch(e => console.log(e));
     }} else {{
         audioUnlocked = true;
     }}
@@ -283,11 +296,32 @@ function tryUnlockAudio() {{
 function speakOfCourse() {{
     tryUnlockAudio();
     if(window.speechSynthesis) {{
+        // IMPORTANT: Cancel any pending speech first
         window.speechSynthesis.cancel(); 
+        
         const u = new SpeechSynthesisUtterance("Of course");
-        u.pitch = 0.5; u.rate = 1.1; u.volume = 1.0;
+        // Ensure voice attributes are set every time
+        u.pitch = 0.5; 
+        u.rate = 1.1; 
+        u.volume = 1.0;
+        
+        // Force English voice if possible to avoid silent failures
+        let voices = window.speechSynthesis.getVoices();
+        if(voices.length > 0) {{
+             // Just pick the first English voice or default
+             let engVoice = voices.find(v => v.lang.includes('en'));
+             if(engVoice) u.voice = engVoice;
+        }}
+        
         window.speechSynthesis.speak(u);
     }}
+}}
+
+// Load voices immediately so they are ready when needed
+if(window.speechSynthesis) {{
+    window.speechSynthesis.onvoiceschanged = () => {{
+        window.speechSynthesis.getVoices();
+    }};
 }}
 
 function canMove(x, y) {{
@@ -296,7 +330,9 @@ function canMove(x, y) {{
 }}
 
 function moveOneStep(dx, dy) {{
+    // Interaction happened, unlock audio
     tryUnlockAudio();
+
     if (canMove(player.x + dx, player.y + dy)) {{
         player.x += dx;
         player.y += dy;
@@ -306,6 +342,8 @@ function moveOneStep(dx, dy) {{
             score += 10;
             totalDots--;
             if(scoreEl) scoreEl.innerText = "SCORE: " + score;
+            
+            // Speak!
             speakOfCourse();
             
             if (totalDots <= 0) {{
@@ -321,8 +359,6 @@ const left = () => moveOneStep(-1, 0);
 const right = () => moveOneStep(1, 0);
 
 // CONTROLS SETUP
-
-// 1. On-Screen Joystick
 const opts = {{passive: false}};
 const btnAdd = (id, fn) => {{
     const el = document.getElementById(id);
@@ -336,7 +372,6 @@ btnAdd('btn-down', down);
 btnAdd('btn-left', left);
 btnAdd('btn-right', right);
 
-// 2. Keyboard
 window.addEventListener('keydown', (e) => {{
     tryUnlockAudio();
     if(e.key === "ArrowUp") up();
@@ -345,13 +380,12 @@ window.addEventListener('keydown', (e) => {{
     if(e.key === "ArrowRight") right();
 }});
 
-// 3. Swipe Support (New Feature)
+// Swipe Support
 let touchStartX = 0;
 let touchStartY = 0;
-const SWIPE_THRESHOLD = 30; // Min pixels to count as swipe
+const SWIPE_THRESHOLD = 30; 
 
 document.addEventListener('touchstart', function(e) {{
-    // Don't interfere if touching joystick buttons specifically (already handled)
     if(e.target.closest('.d-btn')) return;
     touchStartX = e.changedTouches[0].screenX;
     touchStartY = e.changedTouches[0].screenY;
@@ -360,6 +394,9 @@ document.addEventListener('touchstart', function(e) {{
 document.addEventListener('touchend', function(e) {{
     if(e.target.closest('.d-btn')) return;
     
+    // Unlock on swipe completion too
+    tryUnlockAudio();
+
     let touchEndX = e.changedTouches[0].screenX;
     let touchEndY = e.changedTouches[0].screenY;
     
@@ -367,13 +404,11 @@ document.addEventListener('touchend', function(e) {{
     let diffY = touchEndY - touchStartY;
     
     if (Math.abs(diffX) > Math.abs(diffY)) {{
-        // Horizontal Swipe
         if (Math.abs(diffX) > SWIPE_THRESHOLD) {{
             if (diffX > 0) right();
             else left();
         }}
     }} else {{
-        // Vertical Swipe
         if (Math.abs(diffY) > SWIPE_THRESHOLD) {{
             if (diffY > 0) down();
             else up();

@@ -33,8 +33,7 @@ st.markdown("""
     
     .stApp {
         background-color: #5c94fc; 
-        overflow: hidden; /* Prevent dragging */
-        /* Avoid position:fixed here to let iframe size naturally if needed */
+        overflow: hidden; 
     }
     
     .bg-layer {
@@ -97,7 +96,7 @@ game_html = f"""
 
     #section-game {{
         height: 50vh;
-        background: transparent; /* Ensure visibility */
+        background: transparent; 
     }}
 
     #section-controls {{
@@ -131,14 +130,12 @@ game_html = f"""
     /* Canvas */
     canvas {{
         border: 4px solid #fff;
-        background-color: rgba(0,0,0,0.85); /* Dark background to ensure visibility */
+        background-color: rgba(0,0,0,0.85); 
         box-shadow: 0 4px 10px rgba(0,0,0,0.5);
         
-        /* Size constraints */
         width: auto;
         height: 90%; 
         aspect-ratio: 1/1;
-        
         image-rendering: pixelated;
     }}
 
@@ -163,7 +160,6 @@ game_html = f"""
         grid-template-rows: 60px 60px;
         gap: 5px;
     }}
-    /* Shrink controls on short screens */
     @media (max-height: 600px) {{
         #joystick-container {{ transform: scale(0.85); }}
     }}
@@ -228,7 +224,6 @@ if (uploadedImageSrc) {{
     customImage = new Image();
     customImage.src = uploadedImageSrc;
     customImage.onload = () => {{ imageLoaded = true; }}; 
-    // We don't rely only on onload to draw, loop will handle it
 }}
 
 const ROWS = 15;
@@ -325,6 +320,9 @@ const down = () => moveOneStep(0, 1);
 const left = () => moveOneStep(-1, 0);
 const right = () => moveOneStep(1, 0);
 
+// CONTROLS SETUP
+
+// 1. On-Screen Joystick
 const opts = {{passive: false}};
 const btnAdd = (id, fn) => {{
     const el = document.getElementById(id);
@@ -333,12 +331,12 @@ const btnAdd = (id, fn) => {{
         el.addEventListener('mousedown', (e) => {{ e.preventDefault(); fn(); }});
     }}
 }};
-
 btnAdd('btn-up', up);
 btnAdd('btn-down', down);
 btnAdd('btn-left', left);
 btnAdd('btn-right', right);
 
+// 2. Keyboard
 window.addEventListener('keydown', (e) => {{
     tryUnlockAudio();
     if(e.key === "ArrowUp") up();
@@ -347,7 +345,44 @@ window.addEventListener('keydown', (e) => {{
     if(e.key === "ArrowRight") right();
 }});
 
+// 3. Swipe Support (New Feature)
+let touchStartX = 0;
+let touchStartY = 0;
+const SWIPE_THRESHOLD = 30; // Min pixels to count as swipe
 
+document.addEventListener('touchstart', function(e) {{
+    // Don't interfere if touching joystick buttons specifically (already handled)
+    if(e.target.closest('.d-btn')) return;
+    touchStartX = e.changedTouches[0].screenX;
+    touchStartY = e.changedTouches[0].screenY;
+}}, false);
+
+document.addEventListener('touchend', function(e) {{
+    if(e.target.closest('.d-btn')) return;
+    
+    let touchEndX = e.changedTouches[0].screenX;
+    let touchEndY = e.changedTouches[0].screenY;
+    
+    let diffX = touchEndX - touchStartX;
+    let diffY = touchEndY - touchStartY;
+    
+    if (Math.abs(diffX) > Math.abs(diffY)) {{
+        // Horizontal Swipe
+        if (Math.abs(diffX) > SWIPE_THRESHOLD) {{
+            if (diffX > 0) right();
+            else left();
+        }}
+    }} else {{
+        // Vertical Swipe
+        if (Math.abs(diffY) > SWIPE_THRESHOLD) {{
+            if (diffY > 0) down();
+            else up();
+        }}
+    }}
+}}, false);
+
+
+// Draw Loop
 function draw() {{
     try {{
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -403,5 +438,4 @@ draw();
 </html>
 """
 
-# Increase height to 1000 to allow safe scaling on phones
 components.html(game_html, height=1000, scrolling=False)

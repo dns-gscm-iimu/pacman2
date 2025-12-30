@@ -18,12 +18,11 @@ image_path = 'vishesh.jpg'
 b64_image = get_base64_of_bin_file(image_path)
 default_image_js = f"'{f'data:image/jpeg;base64,{b64_image}'}'" if b64_image else "null"
 
-# Custom CSS for Background and Reset
+# Custom CSS
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
 
-    /* Hide standard Streamlit UI elements */
     .stAppHeader, footer, .stToolbar {display: none !important;}
     .block-container {
         padding: 0 !important;
@@ -129,11 +128,11 @@ game_html = f"""
     
     .instruction-text {{
         color: #fff;
-        font-size: 2.5vw; /* Smaller text */
+        font-size: 2.5vw; 
         display: block;
         margin-top: 5px;
         text-shadow: 1px 1px #000;
-        font-family: monospace; /* Easier to read for instructions */
+        font-family: monospace; 
         opacity: 0.9;
     }}
 
@@ -142,7 +141,6 @@ game_html = f"""
         border: 4px solid #fff;
         background-color: rgba(0,0,0,0.85); 
         box-shadow: 0 4px 10px rgba(0,0,0,0.5);
-        
         width: auto;
         height: 90%; 
         aspect-ratio: 1/1;
@@ -278,51 +276,62 @@ for(let r=0; r<ROWS; r++) {{
     }}
 }}
 
-// Audio Handling
+// AUDIO LOGIC ---------------------------------------
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 let audioUnlocked = false;
 
 function tryUnlockAudio() {{
-    // Only attempt unlock if suspended
     if (audioCtx.state === 'suspended') {{
         audioCtx.resume().then(() => {{ 
             audioUnlocked = true; 
         }}).catch(e => console.log(e));
-    }} else {{
-        audioUnlocked = true;
     }}
 }}
 
+function beep(freq=600, duration=0.1) {{
+    try {{
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.frequency.value = freq;
+        osc.type = 'triangle';
+        osc.start();
+        osc.stop(audioCtx.currentTime + duration);
+    }} catch(e) {{ console.log("Beep error", e); }}
+}}
+
 function speakOfCourse() {{
+    // 1. Try Unlock
     tryUnlockAudio();
+    
+    // 2. Try Speech
+    let spoken = false;
     if(window.speechSynthesis) {{
-        // IMPORTANT: Cancel any pending speech first
         window.speechSynthesis.cancel(); 
-        
         const u = new SpeechSynthesisUtterance("Of course");
-        // Ensure voice attributes are set every time
-        u.pitch = 0.5; 
-        u.rate = 1.1; 
-        u.volume = 1.0;
+        u.pitch = 0.5; u.rate = 1.1; u.volume = 1.0;
         
-        // Force English voice if possible to avoid silent failures
         let voices = window.speechSynthesis.getVoices();
         if(voices.length > 0) {{
-             // Just pick the first English voice or default
              let engVoice = voices.find(v => v.lang.includes('en'));
              if(engVoice) u.voice = engVoice;
         }}
         
         window.speechSynthesis.speak(u);
+        spoken = true;
     }}
+    
+    // 3. Fallback Beep if speech fails (or just beep anyway for feedback)
+    if(!spoken) beep();
 }}
 
-// Load voices immediately so they are ready when needed
+// Pre-load voices
 if(window.speechSynthesis) {{
-    window.speechSynthesis.onvoiceschanged = () => {{
-        window.speechSynthesis.getVoices();
-    }};
+    window.speechSynthesis.onvoiceschanged = () => {{ window.speechSynthesis.getVoices(); }};
 }}
+
+// --------------------------------------------------
 
 function canMove(x, y) {{
     if (y < 0 || y >= ROWS || x < 0 || x >= COLS) return false;
@@ -330,8 +339,7 @@ function canMove(x, y) {{
 }}
 
 function moveOneStep(dx, dy) {{
-    // Interaction happened, unlock audio
-    tryUnlockAudio();
+    tryUnlockAudio(); // Unlock on logical move too
 
     if (canMove(player.x + dx, player.y + dy)) {{
         player.x += dx;
@@ -343,7 +351,7 @@ function moveOneStep(dx, dy) {{
             totalDots--;
             if(scoreEl) scoreEl.innerText = "SCORE: " + score;
             
-            // Speak!
+            // Trigger Audio
             speakOfCourse();
             
             if (totalDots <= 0) {{
@@ -363,8 +371,16 @@ const opts = {{passive: false}};
 const btnAdd = (id, fn) => {{
     const el = document.getElementById(id);
     if(el) {{
-        el.addEventListener('touchstart', (e) => {{ e.preventDefault(); fn(); }}, opts);
-        el.addEventListener('mousedown', (e) => {{ e.preventDefault(); fn(); }});
+        el.addEventListener('touchstart', (e) => {{ 
+            tryUnlockAudio();
+            e.preventDefault(); 
+            fn(); 
+        }}, opts);
+        el.addEventListener('mousedown', (e) => {{ 
+            tryUnlockAudio();
+            e.preventDefault(); 
+            fn(); 
+        }});
     }}
 }};
 btnAdd('btn-up', up);
@@ -386,6 +402,14 @@ let touchStartY = 0;
 const SWIPE_THRESHOLD = 30; 
 
 document.addEventListener('touchstart', function(e) {{
+    // CRITICAL: Unlock audio on touch START
+    tryUnlockAudio(); 
+    
+    // Prime speech silently
+    if(window.speechSynthesis) {{
+        window.speechSynthesis.speak(new SpeechSynthesisUtterance(""));
+    }}
+
     if(e.target.closest('.d-btn')) return;
     touchStartX = e.changedTouches[0].screenX;
     touchStartY = e.changedTouches[0].screenY;
@@ -394,9 +418,6 @@ document.addEventListener('touchstart', function(e) {{
 document.addEventListener('touchend', function(e) {{
     if(e.target.closest('.d-btn')) return;
     
-    // Unlock on swipe completion too
-    tryUnlockAudio();
-
     let touchEndX = e.changedTouches[0].screenX;
     let touchEndY = e.changedTouches[0].screenY;
     

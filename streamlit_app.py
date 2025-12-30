@@ -75,7 +75,6 @@ game_html = f"""
         touch-action: none;
     }}
 
-    /* Layout breakdown */
     .section {{
         width: 100%;
         display: flex;
@@ -103,7 +102,6 @@ game_html = f"""
         padding-bottom: 20px;
     }}
 
-    /* Header Text */
     .hbd-text {{
         color: #FFD700;
         text-shadow: 3px 3px #000;
@@ -160,8 +158,18 @@ game_html = f"""
         border: 1px solid #fff;
         z-index: 20;
     }}
+    
+    /* Audio Status Indicator */
+    #audio-status {{
+        position: absolute;
+        bottom: 2px;
+        right: 2px;
+        font-size: 12px;
+        color: rgba(255,255,255,0.5);
+        pointer-events: none;
+        z-index: 30;
+    }}
 
-    /* Joystick */
     #joystick-container {{
         display: grid;
         grid-template-columns: 60px 60px 60px;
@@ -205,6 +213,7 @@ game_html = f"""
 
 <div id="section-game" class="section">
     <div id="score">SCORE: 0</div>
+    <div id="audio-status">🔈 OFF</div>
     <canvas id="gameCanvas" width="400" height="400"></canvas>
 </div>
 
@@ -220,9 +229,9 @@ game_html = f"""
 </div>
 
 <script>
-// Safe Context Retrieval
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
+const audioStatus = document.getElementById('audio-status');
 
 let customImage = null;
 const uploadedImageSrc = {default_image_js};
@@ -239,7 +248,7 @@ const ROWS = 15;
 const COLS = 15;
 const TILE_SIZE = canvas.width / COLS; 
 let totalDots = 0;
-let gameRunning = true; // Always running
+let gameRunning = true; 
 
 // Map
 const map = [
@@ -264,7 +273,6 @@ let player = {{ x: 7, y: 7 }};
 let score = 0;
 const scoreEl = document.getElementById('score');
 
-// Init counts
 for(let r=0; r<ROWS; r++) {{
     for(let c=0; c<COLS; c++) {{
         if(map[r][c] === 0) totalDots++;
@@ -276,62 +284,62 @@ for(let r=0; r<ROWS; r++) {{
     }}
 }}
 
-// AUDIO LOGIC ---------------------------------------
+// --- AUDIO SYSTEM ---
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-let audioUnlocked = false;
+let unlocked = false;
 
-function tryUnlockAudio() {{
-    if (audioCtx.state === 'suspended') {{
-        audioCtx.resume().then(() => {{ 
-            audioUnlocked = true; 
-        }}).catch(e => console.log(e));
-    }}
-}}
-
-function beep(freq=600, duration=0.1) {{
-    try {{
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.frequency.value = freq;
-        osc.type = 'triangle';
-        osc.start();
-        osc.stop(audioCtx.currentTime + duration);
-    }} catch(e) {{ console.log("Beep error", e); }}
-}}
-
-function speakOfCourse() {{
-    // 1. Try Unlock
-    tryUnlockAudio();
-    
-    // 2. Try Speech
-    let spoken = false;
-    if(window.speechSynthesis) {{
-        window.speechSynthesis.cancel(); 
-        const u = new SpeechSynthesisUtterance("Of course");
-        u.pitch = 0.5; u.rate = 1.1; u.volume = 1.0;
-        
-        let voices = window.speechSynthesis.getVoices();
-        if(voices.length > 0) {{
-             let engVoice = voices.find(v => v.lang.includes('en'));
-             if(engVoice) u.voice = engVoice;
+// Global Unlocking Logic
+function unlockAudio() {{
+    if (!unlocked) {{
+        // Resume AudioContext
+        if (audioCtx.state === 'suspended') {{
+            audioCtx.resume();
         }}
         
-        window.speechSynthesis.speak(u);
-        spoken = true;
+        // Prime Speech
+        if(window.speechSynthesis) {{
+            window.speechSynthesis.speak(new SpeechSynthesisUtterance("")); 
+        }}
+        
+        // Play silent buffer
+        const buffer = audioCtx.createBuffer(1, 1, 22050); 
+        const source = audioCtx.createBufferSource(); 
+        source.buffer = buffer; 
+        source.connect(audioCtx.destination); 
+        source.start(0); 
+        
+        unlocked = true;
+        audioStatus.innerText = "🔊 ON";
+        audioStatus.style.color = "#00ff00";
     }}
-    
-    // 3. Fallback Beep if speech fails (or just beep anyway for feedback)
-    if(!spoken) beep();
 }}
 
-// Pre-load voices
+// Global Listener for ANY touch
+document.body.addEventListener('touchstart', unlockAudio, {{passive: false}});
+document.body.addEventListener('click', unlockAudio);
+document.body.addEventListener('keydown', unlockAudio);
+
+function speakOfCourse() {{
+    unlockAudio(); // Ensure unlocked
+    
+    if(window.speechSynthesis) {{
+         // Simple Cancel and Speak
+         window.speechSynthesis.cancel();
+         
+         const u = new SpeechSynthesisUtterance("Of course");
+         u.pitch = 0.5; 
+         u.rate = 1.1; 
+         u.volume = 1.0;
+         window.speechSynthesis.speak(u);
+    }}
+}}
+
+// Load voices
 if(window.speechSynthesis) {{
     window.speechSynthesis.onvoiceschanged = () => {{ window.speechSynthesis.getVoices(); }};
 }}
 
-// --------------------------------------------------
+// --- GAME LOGIC ---
 
 function canMove(x, y) {{
     if (y < 0 || y >= ROWS || x < 0 || x >= COLS) return false;
@@ -339,7 +347,7 @@ function canMove(x, y) {{
 }}
 
 function moveOneStep(dx, dy) {{
-    tryUnlockAudio(); // Unlock on logical move too
+    unlockAudio(); // Redundant unlock check
 
     if (canMove(player.x + dx, player.y + dy)) {{
         player.x += dx;
@@ -371,16 +379,8 @@ const opts = {{passive: false}};
 const btnAdd = (id, fn) => {{
     const el = document.getElementById(id);
     if(el) {{
-        el.addEventListener('touchstart', (e) => {{ 
-            tryUnlockAudio();
-            e.preventDefault(); 
-            fn(); 
-        }}, opts);
-        el.addEventListener('mousedown', (e) => {{ 
-            tryUnlockAudio();
-            e.preventDefault(); 
-            fn(); 
-        }});
+        el.addEventListener('touchstart', (e) => {{ e.preventDefault(); fn(); }}, opts);
+        el.addEventListener('mousedown', (e) => {{ e.preventDefault(); fn(); }});
     }}
 }};
 btnAdd('btn-up', up);
@@ -389,7 +389,6 @@ btnAdd('btn-left', left);
 btnAdd('btn-right', right);
 
 window.addEventListener('keydown', (e) => {{
-    tryUnlockAudio();
     if(e.key === "ArrowUp") up();
     if(e.key === "ArrowDown") down();
     if(e.key === "ArrowLeft") left();
@@ -402,14 +401,6 @@ let touchStartY = 0;
 const SWIPE_THRESHOLD = 30; 
 
 document.addEventListener('touchstart', function(e) {{
-    // CRITICAL: Unlock audio on touch START
-    tryUnlockAudio(); 
-    
-    // Prime speech silently
-    if(window.speechSynthesis) {{
-        window.speechSynthesis.speak(new SpeechSynthesisUtterance(""));
-    }}
-
     if(e.target.closest('.d-btn')) return;
     touchStartX = e.changedTouches[0].screenX;
     touchStartY = e.changedTouches[0].screenY;
